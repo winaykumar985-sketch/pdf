@@ -1,9 +1,13 @@
+import os
+# --- BRUTE FORCE FIX: Uninstall bad OpenCV and force the headless version ---
+os.system("pip uninstall -y opencv-python opencv-contrib-python")
+os.system("pip install opencv-python-headless")
+
 import streamlit as st
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
 import pandas as pd
 import re
-import os
 import gc
 from io import BytesIO
 from PIL import Image
@@ -16,12 +20,11 @@ if 'camera_photos' not in st.session_state:
     st.session_state.camera_photos = []
 
 # --- CORE OCR PROCESSING FUNCTION ---
-# We put this in a function so we don't have to write the OCR code 3 times
 def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
     status = st.empty()
     progress_bar = st.progress(0)
     
-    # Initialize PaddleOCR on cloud server
+    # Initialize PaddleOCR
     ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False)
     excel_data = []
     total_images = len(image_paths_or_bytes)
@@ -30,9 +33,7 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
         status.info(f"Processing image {i + 1} of {total_images}...")
         progress_bar.progress((i + 1) / total_images)
         
-        # Handle if the item is a camera image (bytes) or a saved PDF page (file path)
         if is_bytes:
-            # Convert Streamlit uploaded byte image to a temporary file
             img = Image.open(item)
             temp_path = f"temp_cam_{i}.jpg"
             img.save(temp_path)
@@ -40,7 +41,6 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
         else:
             target_img = item
 
-        # Run OCR
         result = ocr.ocr(target_img, cls=True)
         
         current_shop = "Unknown Shop"
@@ -65,15 +65,13 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
                         if len(sn_desc) == 2:
                             current_items.append([sn_desc[0], sn_desc[1], parts[1], parts[2], parts[3]])
         
-        # Append this image's structured data
         if current_items:
             excel_data.append(["Shop Name:", current_shop, "", "", ""])
             excel_data.append(["GST Details:", current_gst, "", "", ""])
             excel_data.append(["SN", "DESCRIPTION", "Qty", "RATE", "AMOUNT"])
             excel_data.extend(current_items)
-            excel_data.append(["", "", "", "", ""]) # One row space
+            excel_data.append(["", "", "", "", ""]) 
             
-        # Clean up temporary files
         if is_bytes and os.path.exists(target_img):
             os.remove(target_img)
         gc.collect()
@@ -100,7 +98,6 @@ if option == "1. Single PDF (All Pages)":
         pdf_document = fitz.open("temp.pdf")
         image_paths = []
         
-        # Convert all pages to images
         for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
             pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
@@ -111,12 +108,9 @@ if option == "1. Single PDF (All Pages)":
         pdf_document.close()
         os.remove("temp.pdf")
         
-        # Send to the core OCR function
         excel_bytes = process_images_to_excel(image_paths, is_bytes=False)
-        
         st.download_button(label="📥 Download Excel", data=excel_bytes, file_name="Structured_Bills.xlsx")
         
-        # Cleanup
         for path in image_paths:
             if os.path.exists(path):
                 os.remove(path)
@@ -128,7 +122,6 @@ elif option == "2. Multiple Separate PDFs":
         image_paths = []
         file_counter = 0
         
-        # Convert pages from ALL uploaded PDFs into images
         for uploaded_file in uploaded_files:
             temp_pdf_name = f"temp_{file_counter}.pdf"
             with open(temp_pdf_name, "wb") as f:
@@ -146,12 +139,9 @@ elif option == "2. Multiple Separate PDFs":
             os.remove(temp_pdf_name)
             file_counter += 1
             
-        # Send to the core OCR function
         excel_bytes = process_images_to_excel(image_paths, is_bytes=False)
-        
         st.download_button(label="📥 Download Excel", data=excel_bytes, file_name="Structured_Bills.xlsx")
         
-        # Cleanup
         for path in image_paths:
             if os.path.exists(path):
                 os.remove(path)
@@ -159,34 +149,24 @@ elif option == "2. Multiple Separate PDFs":
 # OPTION 3: Camera Input
 elif option == "3. Camera (Take up to 50 photos)":
     st.write("Take pictures of your bills one by one. They will save below.")
-    
-    # The camera widget
     photo = st.camera_input("Take a photo")
     
-    # Add photo to memory if it's new and we haven't hit 50
     if photo is not None:
         if len(st.session_state.camera_photos) < 50:
-            # Check if this specific photo is already in the list
             if photo not in st.session_state.camera_photos:
                 st.session_state.camera_photos.append(photo)
         else:
             st.warning("You have reached the maximum of 50 photos.")
 
-    # Show how many photos are queued up
     st.info(f"Photos queued for processing: {len(st.session_state.camera_photos)} / 50")
     
-    # Button to clear photos if user makes a mistake
     if len(st.session_state.camera_photos) > 0:
         if st.button("Clear Photos & Start Over"):
             st.session_state.camera_photos = []
             st.rerun()
             
         st.divider()
-        # Button to process the queued photos
         if st.button("Submit & Process Photos"):
             excel_bytes = process_images_to_excel(st.session_state.camera_photos, is_bytes=True)
-            
             st.download_button(label="📥 Download Excel", data=excel_bytes, file_name="Camera_Bills.xlsx")
-            
-            # Clear memory after successful download
             st.session_state.camera_photos = []
