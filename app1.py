@@ -8,9 +8,12 @@ import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
 import pandas as pd
 import re
+import os
 import gc
 from io import BytesIO
 from PIL import Image
+
+# ... rest of your UI code stays exactly the same ...
 
 st.title("Cloud OCR: Bill to Excel Converter")
 st.write("Extract structured data from scanned bills instantly.")
