@@ -106,7 +106,7 @@ if option == "1. Single PDF (All Pages)":
         
         for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
-            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_path = f"page_{page_num}.jpg"
             pix.save(img_path)
             image_paths.append(img_path)
@@ -135,7 +135,7 @@ elif option == "2. Multiple Separate PDFs":
             pdf_document = fitz.open(temp_pdf_name)
             for page_num in range(len(pdf_document)):
                 page = pdf_document[page_num]
-                pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
                 img_path = f"file_{file_counter}_page_{page_num}.jpg"
                 pix.save(img_path)
                 image_paths.append(img_path)
