@@ -7,16 +7,12 @@ import streamlit as st
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
 import pandas as pd
-import re
-import os
 import gc
 from io import BytesIO
 from PIL import Image
 
-# ... rest of your UI code stays exactly the same ...
-
 st.title("Cloud OCR: Bill to Excel Converter")
-st.write("Extract structured data from scanned bills instantly.")
+st.write("Extracting all text exactly as the AI sees it.")
 
 if 'camera_photos' not in st.session_state:
     st.session_state.camera_photos = []
@@ -44,45 +40,29 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
 
         result = ocr.ocr(target_img, cls=True)
         
-        current_shop = "Unknown Shop"
-        current_gst = "Not Found"
-        current_items = []
-        line_counter = 0
+        # Add a header so you know which page the data came from
+        excel_data.append([f"--- BILL PAGE {i+1} ---"])
         
+        # Catch ALL text the AI finds and put it in a new row
         if result[0] is not None:
             for line_data in result[0]:
                 line = line_data[1][0].strip()
-                line_counter += 1
-                
-                if line_counter == 2:
-                    current_shop = line
-                if "GST" in line.upper():
-                    current_gst = line
-                    
-                if re.match(r'^\d+', line):
-                    parts = line.rsplit(maxsplit=3)
-                    if len(parts) == 4:
-                        sn_desc = parts[0].split(maxsplit=1)
-                        if len(sn_desc) == 2:
-                            current_items.append([sn_desc[0], sn_desc[1], parts[1], parts[2], parts[3]])
+                excel_data.append([line])
         
-        if current_items:
-            excel_data.append(["Shop Name:", current_shop, "", "", ""])
-            excel_data.append(["GST Details:", current_gst, "", "", ""])
-            excel_data.append(["SN", "DESCRIPTION", "Qty", "RATE", "AMOUNT"])
-            excel_data.extend(current_items)
-            excel_data.append(["", "", "", "", ""]) 
+        excel_data.append([""]) # Add a blank row between pages
             
         if is_bytes and os.path.exists(target_img):
             os.remove(target_img)
         gc.collect()
         
     status.success("🎉 Cloud Processing Complete! Your file is ready.")
-    df = pd.DataFrame(excel_data)
+    
+    # Save it to a single column in Excel
+    df = pd.DataFrame(excel_data, columns=["Extracted Text"])
     
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, header=False, sheet_name='Clean_Data')
+        df.to_excel(writer, index=False, header=True, sheet_name='Raw_Data')
     return output.getvalue()
 
 st.divider()
