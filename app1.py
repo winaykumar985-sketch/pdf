@@ -1,9 +1,13 @@
+import os
+# --- THE SHIELD: Fix the broken server tools instantly ---
+os.system("pip uninstall -y opencv-python opencv-contrib-python")
+os.system("pip install opencv-python-headless")
+
 import streamlit as st
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
 import pandas as pd
 import re
-import os
 import gc
 from io import BytesIO
 from PIL import Image
@@ -18,6 +22,7 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
     status = st.empty()
     progress_bar = st.progress(0)
     
+    # Initialize PaddleOCR
     ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False)
     excel_data = []
     total_images = len(image_paths_or_bytes)
