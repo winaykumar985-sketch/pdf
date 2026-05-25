@@ -1,0 +1,5 @@
+PyMuPDF
+paddleocr
+paddlepaddle
+pandas
+xlsxwriter
