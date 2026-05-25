@@ -1,5 +1,5 @@
 PyMuPDF
-paddleocr
+paddleocr==2.8.1
 paddlepaddle
 pandas
 xlsxwriter
