@@ -1,18 +1,14 @@
-import os
-# --- THE SHIELD: Fix the broken server tools instantly ---
-os.system("pip uninstall -y opencv-python opencv-contrib-python")
-os.system("pip install opencv-python-headless")
-
 import streamlit as st
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
 import pandas as pd
 import gc
+import os
 from io import BytesIO
 from PIL import Image
 
 st.title("Cloud OCR: Bill to Excel Converter")
-st.write("Extracting all text exactly as the AI sees it.")
+st.write("Extracting and aligning text horizontally.")
 
 if 'camera_photos' not in st.session_state:
     st.session_state.camera_photos = []
@@ -21,7 +17,6 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
     status = st.empty()
     progress_bar = st.progress(0)
     
-    # Initialize PaddleOCR
     ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False)
     excel_data = []
     total_images = len(image_paths_or_bytes)
@@ -40,16 +35,49 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
 
         result = ocr.ocr(target_img, cls=True)
         
-        # Add a header so you know which page the data came from
         excel_data.append([f"--- BILL PAGE {i+1} ---"])
         
-        # Catch ALL text the AI finds and put it in a new row
         if result[0] is not None:
+            # 1. Gather all text boxes with their X and Y coordinates
+            boxes_and_texts = []
             for line_data in result[0]:
-                line = line_data[1][0].strip()
-                excel_data.append([line])
+                box = line_data[0]
+                text = line_data[1][0].strip()
+                # Find the vertical center (Y-axis) of the text
+                y_center = (box[0][1] + box[2][1]) / 2 
+                # Save: (Y-coord, X-coord, Text)
+                boxes_and_texts.append((y_center, box[0][0], text))
+
+            # 2. Sort all text from top to bottom of the page
+            boxes_and_texts.sort(key=lambda x: x[0])
+
+            # 3. Group text that sits on the same horizontal line
+            current_row = []
+            current_y = None
+            Y_TOLERANCE = 15 # If text is within 15 pixels vertically, it's the same row
+
+            for item in boxes_and_texts:
+                y, x, text = item
+                if current_y is None:
+                    current_y = y
+                    current_row.append((x, text))
+                elif abs(y - current_y) <= Y_TOLERANCE:
+                    current_row.append((x, text))
+                else:
+                    # Sort the row from left to right (X-axis) before saving
+                    current_row.sort(key=lambda x: x[0])
+                    excel_data.append([t[1] for t in current_row])
+                    
+                    # Start a new row
+                    current_y = y
+                    current_row = [(x, text)]
+
+            # Save the very last row
+            if current_row:
+                current_row.sort(key=lambda x: x[0])
+                excel_data.append([t[1] for t in current_row])
         
-        excel_data.append([""]) # Add a blank row between pages
+        excel_data.append([""]) 
             
         if is_bytes and os.path.exists(target_img):
             os.remove(target_img)
@@ -57,12 +85,11 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
         
     status.success("🎉 Cloud Processing Complete! Your file is ready.")
     
-    # Save it to a single column in Excel
-    df = pd.DataFrame(excel_data, columns=["Extracted Text"])
+    df = pd.DataFrame(excel_data)
     
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, header=True, sheet_name='Raw_Data')
+        df.to_excel(writer, index=False, header=False, sheet_name='Clean_Data')
     return output.getvalue()
 
 st.divider()
