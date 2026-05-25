@@ -1,13 +1,9 @@
-import os
-# --- BRUTE FORCE FIX: Uninstall bad OpenCV and force the headless version ---
-os.system("pip uninstall -y opencv-python opencv-contrib-python")
-os.system("pip install opencv-python-headless")
-
 import streamlit as st
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCR
 import pandas as pd
 import re
+import os
 import gc
 from io import BytesIO
 from PIL import Image
@@ -15,16 +11,13 @@ from PIL import Image
 st.title("Cloud OCR: Bill to Excel Converter")
 st.write("Extract structured data from scanned bills instantly.")
 
-# Create memory for camera photos
 if 'camera_photos' not in st.session_state:
     st.session_state.camera_photos = []
 
-# --- CORE OCR PROCESSING FUNCTION ---
 def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
     status = st.empty()
     progress_bar = st.progress(0)
     
-    # Initialize PaddleOCR
     ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False)
     excel_data = []
     total_images = len(image_paths_or_bytes)
@@ -84,11 +77,9 @@ def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
         df.to_excel(writer, index=False, header=False, sheet_name='Clean_Data')
     return output.getvalue()
 
-# --- USER INTERFACE (3 OPTIONS) ---
 st.divider()
 option = st.radio("Choose Input Method:", ["1. Single PDF (All Pages)", "2. Multiple Separate PDFs", "3. Camera (Take up to 50 photos)"])
 
-# OPTION 1: Single PDF
 if option == "1. Single PDF (All Pages)":
     uploaded_file = st.file_uploader("Upload ONE PDF", type=["pdf"])
     if uploaded_file and st.button("Process PDF"):
@@ -115,7 +106,6 @@ if option == "1. Single PDF (All Pages)":
             if os.path.exists(path):
                 os.remove(path)
 
-# OPTION 2: Multiple PDFs
 elif option == "2. Multiple Separate PDFs":
     uploaded_files = st.file_uploader("Upload Multiple PDFs", type=["pdf"], accept_multiple_files=True)
     if uploaded_files and st.button("Process All PDFs"):
@@ -146,7 +136,6 @@ elif option == "2. Multiple Separate PDFs":
             if os.path.exists(path):
                 os.remove(path)
 
-# OPTION 3: Camera Input
 elif option == "3. Camera (Take up to 50 photos)":
     st.write("Take pictures of your bills one by one. They will save below.")
     photo = st.camera_input("Take a photo")
