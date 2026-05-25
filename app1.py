@@ -5,99 +5,188 @@ import pandas as pd
 import re
 import os
 import gc
+from io import BytesIO
+from PIL import Image
 
-st.title("Cloud PDF-to-Excel Structured Converter")
-st.write("Upload your scanned PDF. The cloud will process it—your laptop RAM stays completely free!")
+st.title("Cloud OCR: Bill to Excel Converter")
+st.write("Extract structured data from scanned bills instantly.")
 
-uploaded_file = st.file_uploader("Upload Scanned PDF", type=["pdf"])
+# Create memory for camera photos
+if 'camera_photos' not in st.session_state:
+    st.session_state.camera_photos = []
 
-if uploaded_file is not None:
-    if st.button("Start Cloud Processing"):
-        # Create placeholders for live status updates
-        status = st.empty()
-        progress_bar = st.progress(0)
+# --- CORE OCR PROCESSING FUNCTION ---
+# We put this in a function so we don't have to write the OCR code 3 times
+def process_images_to_excel(image_paths_or_bytes, is_bytes=False):
+    status = st.empty()
+    progress_bar = st.progress(0)
+    
+    # Initialize PaddleOCR on cloud server
+    ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False)
+    excel_data = []
+    total_images = len(image_paths_or_bytes)
+    
+    for i, item in enumerate(image_paths_or_bytes):
+        status.info(f"Processing image {i + 1} of {total_images}...")
+        progress_bar.progress((i + 1) / total_images)
         
-        status.info("Step 1: Splitting PDF into high-res images in the cloud...")
+        # Handle if the item is a camera image (bytes) or a saved PDF page (file path)
+        if is_bytes:
+            # Convert Streamlit uploaded byte image to a temporary file
+            img = Image.open(item)
+            temp_path = f"temp_cam_{i}.jpg"
+            img.save(temp_path)
+            target_img = temp_path
+        else:
+            target_img = item
+
+        # Run OCR
+        result = ocr.ocr(target_img, cls=True)
         
-        # Save uploaded PDF to cloud disk temporarily
+        current_shop = "Unknown Shop"
+        current_gst = "Not Found"
+        current_items = []
+        line_counter = 0
+        
+        if result[0] is not None:
+            for line_data in result[0]:
+                line = line_data[1][0].strip()
+                line_counter += 1
+                
+                if line_counter == 2:
+                    current_shop = line
+                if "GST" in line.upper():
+                    current_gst = line
+                    
+                if re.match(r'^\d+', line):
+                    parts = line.rsplit(maxsplit=3)
+                    if len(parts) == 4:
+                        sn_desc = parts[0].split(maxsplit=1)
+                        if len(sn_desc) == 2:
+                            current_items.append([sn_desc[0], sn_desc[1], parts[1], parts[2], parts[3]])
+        
+        # Append this image's structured data
+        if current_items:
+            excel_data.append(["Shop Name:", current_shop, "", "", ""])
+            excel_data.append(["GST Details:", current_gst, "", "", ""])
+            excel_data.append(["SN", "DESCRIPTION", "Qty", "RATE", "AMOUNT"])
+            excel_data.extend(current_items)
+            excel_data.append(["", "", "", "", ""]) # One row space
+            
+        # Clean up temporary files
+        if is_bytes and os.path.exists(target_img):
+            os.remove(target_img)
+        gc.collect()
+        
+    status.success("🎉 Cloud Processing Complete! Your file is ready.")
+    df = pd.DataFrame(excel_data)
+    
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, header=False, sheet_name='Clean_Data')
+    return output.getvalue()
+
+# --- USER INTERFACE (3 OPTIONS) ---
+st.divider()
+option = st.radio("Choose Input Method:", ["1. Single PDF (All Pages)", "2. Multiple Separate PDFs", "3. Camera (Take up to 50 photos)"])
+
+# OPTION 1: Single PDF
+if option == "1. Single PDF (All Pages)":
+    uploaded_file = st.file_uploader("Upload ONE PDF", type=["pdf"])
+    if uploaded_file and st.button("Process PDF"):
         with open("temp.pdf", "wb") as f:
             f.write(uploaded_file.getbuffer())
-            
+        
         pdf_document = fitz.open("temp.pdf")
-        total_pages = len(pdf_document)
+        image_paths = []
         
-        # Initialize PaddleOCR on cloud server (Forces CPU mode for stability)
-        ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False)
-        
-        excel_data = []
-        
-        # Process each page
-        for page_num in range(total_pages):
-            status.info(f"Step 2: Processing page {page_num + 1} of {total_pages}...")
-            progress_bar.progress((page_num + 1) / total_pages)
-            
-            # Extract page as image
+        # Convert all pages to images
+        for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
-            matrix = fitz.Matrix(2.0, 2.0) 
-            pix = page.get_pixmap(matrix=matrix)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
             img_path = f"page_{page_num}.jpg"
             pix.save(img_path)
-            
-            # Run OCR on the image
-            result = ocr.ocr(img_path, cls=True)
-            
-            # Process text lines immediately to extract structured table
-            current_shop = "Unknown Shop"
-            current_gst = "Not Found"
-            current_items = []
-            line_counter = 0
-            
-            if result[0] is not None:
-                for line_data in result[0]:
-                    line = line_data[1][0].strip()
-                    line_counter += 1
-                    
-                    if line_counter == 2:
-                        current_shop = line
-                    if "GST" in line.upper():
-                        current_gst = line
-                        
-                    if re.match(r'^\d+', line):
-                        parts = line.rsplit(maxsplit=3)
-                        if len(parts) == 4:
-                            sn_desc = parts[0].split(maxsplit=1)
-                            if len(sn_desc) == 2:
-                                current_items.append([sn_desc[0], sn_desc[1], parts[1], parts[2], parts[3]])
-            
-            # Append this page's structured data to global sheet list
-            if current_items:
-                excel_data.append(["Shop Name:", current_shop, "", "", ""])
-                excel_data.append(["GST Details:", current_gst, "", "", ""])
-                excel_data.append(["SN", "DESCRIPTION", "Qty", "RATE", "AMOUNT"])
-                excel_data.extend(current_items)
-                excel_data.append(["", "", "", "", ""]) # One row space
-                
-            # Delete temporary image to keep cloud memory clean
-            os.remove(img_path)
-            gc.collect()
+            image_paths.append(img_path)
             
         pdf_document.close()
         os.remove("temp.pdf")
         
-        # Convert everything to Excel
-        status.success("🎉 Cloud Processing Complete! Your file is ready.")
-        df = pd.DataFrame(excel_data)
+        # Send to the core OCR function
+        excel_bytes = process_images_to_excel(image_paths, is_bytes=False)
         
-        # Save to memory buffer for downloader
-        from io import BytesIO
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, header=False, sheet_name='Clean_Data')
-        processed_data = output.getvalue()
+        st.download_button(label="📥 Download Excel", data=excel_bytes, file_name="Structured_Bills.xlsx")
         
-        st.download_button(
-            label="📥 Download Structured Excel File",
-            data=processed_data,
-            file_name="Structured_Bills.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        # Cleanup
+        for path in image_paths:
+            if os.path.exists(path):
+                os.remove(path)
+
+# OPTION 2: Multiple PDFs
+elif option == "2. Multiple Separate PDFs":
+    uploaded_files = st.file_uploader("Upload Multiple PDFs", type=["pdf"], accept_multiple_files=True)
+    if uploaded_files and st.button("Process All PDFs"):
+        image_paths = []
+        file_counter = 0
+        
+        # Convert pages from ALL uploaded PDFs into images
+        for uploaded_file in uploaded_files:
+            temp_pdf_name = f"temp_{file_counter}.pdf"
+            with open(temp_pdf_name, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            pdf_document = fitz.open(temp_pdf_name)
+            for page_num in range(len(pdf_document)):
+                page = pdf_document[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+                img_path = f"file_{file_counter}_page_{page_num}.jpg"
+                pix.save(img_path)
+                image_paths.append(img_path)
+                
+            pdf_document.close()
+            os.remove(temp_pdf_name)
+            file_counter += 1
+            
+        # Send to the core OCR function
+        excel_bytes = process_images_to_excel(image_paths, is_bytes=False)
+        
+        st.download_button(label="📥 Download Excel", data=excel_bytes, file_name="Structured_Bills.xlsx")
+        
+        # Cleanup
+        for path in image_paths:
+            if os.path.exists(path):
+                os.remove(path)
+
+# OPTION 3: Camera Input
+elif option == "3. Camera (Take up to 50 photos)":
+    st.write("Take pictures of your bills one by one. They will save below.")
+    
+    # The camera widget
+    photo = st.camera_input("Take a photo")
+    
+    # Add photo to memory if it's new and we haven't hit 50
+    if photo is not None:
+        if len(st.session_state.camera_photos) < 50:
+            # Check if this specific photo is already in the list
+            if photo not in st.session_state.camera_photos:
+                st.session_state.camera_photos.append(photo)
+        else:
+            st.warning("You have reached the maximum of 50 photos.")
+
+    # Show how many photos are queued up
+    st.info(f"Photos queued for processing: {len(st.session_state.camera_photos)} / 50")
+    
+    # Button to clear photos if user makes a mistake
+    if len(st.session_state.camera_photos) > 0:
+        if st.button("Clear Photos & Start Over"):
+            st.session_state.camera_photos = []
+            st.rerun()
+            
+        st.divider()
+        # Button to process the queued photos
+        if st.button("Submit & Process Photos"):
+            excel_bytes = process_images_to_excel(st.session_state.camera_photos, is_bytes=True)
+            
+            st.download_button(label="📥 Download Excel", data=excel_bytes, file_name="Camera_Bills.xlsx")
+            
+            # Clear memory after successful download
+            st.session_state.camera_photos = []
