@@ -4,4 +4,3 @@ paddlepaddle
 pandas
 xlsxwriter
 opencv-python-headless
-Pillow
